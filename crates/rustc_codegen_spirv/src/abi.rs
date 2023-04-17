@@ -412,6 +412,8 @@ impl<'tcx> ConvSpirvType<'tcx> for TyAndLayout<'tcx> {
                 let b_offset = a.primitive().size(cx).align_to(b.primitive().align(cx).abi);
                 let a = trans_scalar(cx, span, *self, a, a_offset);
                 let b = trans_scalar(cx, span, *self, b, b_offset);
+                let mut offsets_iter = [a_offset, b_offset].into_iter();
+                let mut field_types_iter = [a, b].into_iter();
                 let size = if self.is_unsized() {
                     None
                 } else {
@@ -419,21 +421,53 @@ impl<'tcx> ConvSpirvType<'tcx> for TyAndLayout<'tcx> {
                 };
                 // FIXME(eddyb) use `ArrayVec` here.
                 let mut field_names = Vec::new();
+                let mut field_types = vec![a, b];
+                let mut field_offsets = vec![a_offset, b_offset];
                 if let TyKind::Adt(adt, _) = self.ty.kind() {
                     if let Variants::Single { index } = self.variants {
+                        //field_types.clear();
+                        //field_offsets.clear();
+
+                        // If the type has descriminant, we need to skip the first field.
+                        if let Some(index) = self.fields.index_by_increasing_offset().next() {
+                            if self.fields.offset(index) != Size::ZERO {
+                                //field_types.push(field_types_iter.next().unwrap());
+                                //field_offsets.push(offsets_iter.next().unwrap());
+                            }
+                        }
                         for i in self.fields.index_by_increasing_offset() {
                             let field = &adt.variants()[index].fields[i];
                             field_names.push(field.name);
+
+                            if self.field(cx, i).is_zst() {
+                                field_types.push(self.field(cx, i).spirv_type(span, cx));
+                                field_offsets.push(self.fields.offset(i));
+                            } else if let (Some(offset), Some(field_type)) =
+                                (offsets_iter.next(), field_types_iter.next())
+                            {
+                                //field_types.push(field_type);
+                                //field_offsets.push(offset);
+                            } else {
+                                //unreachable!("Too many non zst fields in scalar pair: {:?}", &self);
+                            }
                         }
+                        dbg!(&self);
+                        assert!(offsets_iter.next().is_none(), "{:?}", &field_offsets);
+                        assert!(field_types_iter.next().is_none(), "{:?}", &field_types);
+                        assert_eq!(field_offsets.len(), field_types.len());
+                        assert!(field_types.len() >= 2);
+                        dbg!(&field_names);
+                        dbg!(&field_types);
+                        dbg!(&field_offsets);
                     }
                 }
                 SpirvType::Adt {
                     def_id: def_id_for_spirv_type_adt(*self),
                     size,
                     align: self.align.abi,
-                    field_types: &[a, b],
-                    field_offsets: &[a_offset, b_offset],
-                    field_names: if field_names.len() == 2 {
+                    field_types: &field_types,
+                    field_offsets: &field_offsets,
+                    field_names: if !field_names.is_empty() {
                         Some(&field_names)
                     } else {
                         None

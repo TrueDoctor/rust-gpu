@@ -2133,7 +2133,6 @@ dependencies = [
 name = "sky-shader"
 version = "0.0.0"
 dependencies = [
- "shared",
  "spirv-std",
 ]
 
