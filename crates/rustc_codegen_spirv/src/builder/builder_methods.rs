@@ -383,6 +383,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
 
         // NOTE(eddyb) `ty` and `ty_kind` should be kept in sync.
         let mut ty_kind = self.lookup_type(ty);
+        dbg!(ty, leaf_ty);
 
         let mut indices = Vec::new();
         loop {
@@ -390,8 +391,10 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 SpirvType::Adt {
                     field_types,
                     field_offsets,
+                    field_names,
                     ..
                 } => {
+                    dbg!(field_types, field_offsets, offset, field_names);
                     let (i, field_ty, field_ty_kind, offset_in_field) = field_offsets
                         .iter()
                         .enumerate()
@@ -406,6 +409,8 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                             let field_ty_kind = self.lookup_type(field_ty);
 
                             let offset_in_field = offset - field_offset;
+
+                            dbg!(field_ty, field_ty_kind, offset_in_field);
                             if field_ty_kind
                                 .sizeof(self)
                                 .map_or(true, |size| offset_in_field < size)
@@ -413,6 +418,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                                 // get the correct entry
                                 || offset_in_field == Size::ZERO && leaf_ty == field_ty
                             {
+                                dbg!(i, field_ty, field_ty_kind, offset_in_field);
                                 Some((i, field_ty, field_ty_kind, offset_in_field))
                             } else {
                                 None
@@ -1226,6 +1232,7 @@ impl<'a, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'tcx> {
     }
 
     fn struct_gep(&mut self, ty: Self::Type, ptr: Self::Value, idx: u64) -> Self::Value {
+        dbg!(idx);
         let pointee = match self.lookup_type(ptr.ty) {
             SpirvType::Pointer { pointee } => {
                 assert_ty_eq!(self, ty, pointee);
@@ -1237,7 +1244,18 @@ impl<'a, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'tcx> {
         };
         let pointee_kind = self.lookup_type(pointee);
         let result_pointee_type = match pointee_kind {
-            SpirvType::Adt { field_types, .. } => field_types[idx as usize],
+            SpirvType::Adt { field_types, .. } => {
+                if idx as usize >= field_types.len() {
+                    dbg!(idx, pointee_kind);
+                    self.fatal(&format!(
+                        "struct_gep index out of bounds: {idx} >= {len}",
+                        idx = idx,
+                        len = field_types.len()
+                    ));
+                }
+                dbg!(idx, pointee_kind, field_types);
+                field_types[idx as usize]
+            }
             SpirvType::Array { element, .. }
             | SpirvType::RuntimeArray { element, .. }
             | SpirvType::Vector { element, .. }
@@ -1273,6 +1291,7 @@ impl<'a, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'tcx> {
                 }
                 _ => unreachable!(),
             };
+            dbg!("resolving struct gep");
             if let Some(indices) = self.recover_access_chain_from_offset(
                 original_pointee_ty,
                 result_pointee_type,
@@ -1555,6 +1574,11 @@ impl<'a, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'tcx> {
                 "pointercast called on non-pointer dest type: {other:?}"
             )),
         };
+        dbg!(
+            "resolving pointercast from {:#?} to {:#?}",
+            val_pointee,
+            dest_pointee
+        );
         if val.ty == dest_ty {
             val
         } else if let Some(indices) =
